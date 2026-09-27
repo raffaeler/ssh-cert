@@ -331,7 +331,11 @@ sudo provisioning and exact revocation. Without that explicitly configured
 fixture, the live SSH integration test is reported as skipped.
 
 CI targets each supported architecture, tests, and uploads one executable per
-target. Linux also uses Python's standard-library pseudoterminal support to
+target. Pushing a tag matching `v<Version>` in the application project creates
+a GitHub Release only after all three platform jobs pass. The release contains
+`ssh-cert-win-x64.exe` and one-executable archives for `linux-x64` and
+`linux-arm64`; extract the Linux archive to preserve the executable permission.
+Linux also uses Python's standard-library pseudoterminal support to
 exercise the published UI at the bottom of the screen, resize it, create an
 empty group, and apply that group through the CLI. Python is test-only.
 The binary bundles the .NET runtime; native runtime files may be

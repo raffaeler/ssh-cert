@@ -2,6 +2,10 @@ name: Build and verify
 
 on:
   push:
+    branches:
+      - '**'
+    tags:
+      - 'v*'
   pull_request:
   workflow_dispatch:
 
@@ -99,3 +103,42 @@ jobs:
           if [ -f "$RUNNER_TEMP/ssh-cert-fixture/sshd.pid" ]; then
             sudo kill "$(cat "$RUNNER_TEMP/ssh-cert-fixture/sshd.pid")"
           fi
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ssh-cert-*
+          path: release-artifacts
+      - name: Validate release version and binaries
+        shell: pwsh
+        run: |
+          $project = [xml](Get-Content 'src/ssh-cert/ssh-cert.csproj' -Raw)
+          $expectedTag = 'v' + $project.SelectSingleNode('//Version').InnerText
+          if ($env:GITHUB_REF_NAME -ne $expectedTag) { throw "Tag must match project version: $expectedTag" }
+          foreach ($rid in 'win-x64', 'linux-x64', 'linux-arm64') {
+            $files = @(Get-ChildItem "release-artifacts/ssh-cert-$rid" -File)
+            if ($files.Count -ne 1 -or $files[0].Name -ne $(if ($rid -eq 'win-x64') { 'ssh-cert.exe' } else { 'ssh-cert' })) {
+              throw "Expected one verified executable for $rid"
+            }
+          }
+      - name: Package release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release-assets
+          cp release-artifacts/ssh-cert-win-x64/ssh-cert.exe release-assets/ssh-cert-win-x64.exe
+          for rid in linux-x64 linux-arm64; do
+            chmod 755 "release-artifacts/ssh-cert-$rid/ssh-cert"
+            tar -czf "release-assets/ssh-cert-$rid.tar.gz" -C "release-artifacts/ssh-cert-$rid" ssh-cert
+          done
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release-assets/* --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
