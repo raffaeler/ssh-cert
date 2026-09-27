@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ssh-cert/ssh-cert.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ssh-cert.Tests/ssh-cert.Tests.csproj" />
+  </Folder>
+</Solution>

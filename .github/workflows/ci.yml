@@ -1,0 +1,100 @@
+name: Build and verify
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-24.04
+            rid: linux-x64
+          - os: ubuntu-24.04-arm
+            rid: linux-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Create disposable Linux SSH fixture
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v sshd >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq openssh-server
+          fi
+          sudo useradd -m -s /bin/sh sshcerttarget
+          sudo useradd -m -s /bin/sh sshcertadmin
+          # Deliberately public credentials for disposable, loopback-only CI users.
+          printf 'sshcerttarget:ci-fixture-only\nsshcertadmin:ci-fixture-only\n' | sudo chpasswd
+          echo 'sshcertadmin ALL=(sshcerttarget) /bin/sh' | sudo tee /etc/sudoers.d/ssh-cert-test >/dev/null
+          sudo chmod 440 /etc/sudoers.d/ssh-cert-test
+          mkdir -p "$RUNNER_TEMP/ssh-cert-fixture"
+          sudo mkdir -p /run/sshd
+          ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/ssh-cert-fixture/host_key"
+          cat > "$RUNNER_TEMP/ssh-cert-fixture/sshd_config" <<EOF
+          ListenAddress 127.0.0.1
+          Port 22222
+          HostKey $RUNNER_TEMP/ssh-cert-fixture/host_key
+          PidFile $RUNNER_TEMP/ssh-cert-fixture/sshd.pid
+          PasswordAuthentication yes
+          PubkeyAuthentication yes
+          UsePAM no
+          AllowUsers sshcerttarget sshcertadmin
+          AuthorizedKeysFile .ssh/authorized_keys
+          Subsystem sftp internal-sftp
+          EOF
+          sudo /usr/sbin/sshd -f "$RUNNER_TEMP/ssh-cert-fixture/sshd_config" -E "$RUNNER_TEMP/ssh-cert-fixture/sshd.log"
+          echo 'SSHCERT_TEST_HOST=127.0.0.1' >> "$GITHUB_ENV"
+          echo 'SSHCERT_TEST_PORT=22222' >> "$GITHUB_ENV"
+          echo 'SSHCERT_TEST_USER=sshcerttarget' >> "$GITHUB_ENV"
+          echo 'SSHCERT_TEST_ADMIN=sshcertadmin' >> "$GITHUB_ENV"
+          echo 'SSHCERT_TEST_PASSWORD=ci-fixture-only' >> "$GITHUB_ENV"
+      - name: Test
+        run: dotnet test ssh-cert.slnx -c Release --logger "console;verbosity=normal"
+      - name: Enforce private-field naming
+        run: dotnet format style ssh-cert.slnx --no-restore --diagnostics IDE1006 --verify-no-changes
+      - name: Publish one self-contained executable
+        working-directory: src/ssh-cert
+        run: dotnet publish -c Release -r ${{ matrix.rid }} --self-contained true -o ../../artifacts/${{ matrix.rid }}
+      - name: Verify exact artifact shape and executable
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem "artifacts/${{ matrix.rid }}" -File)
+          if ($files.Count -ne 1) { throw "Expected exactly one distributable executable" }
+          $env:DOTNET_ROOT = Join-Path $env:RUNNER_TEMP "no-dotnet-here"
+          $project = [xml](Get-Content "src/ssh-cert/ssh-cert.csproj" -Raw)
+          $banner = "ssh-cert " + $project.SelectSingleNode("//Version").InnerText
+          $helpOutput = @(& $files[0].FullName --help)
+          if ($LASTEXITCODE -ne 0) { throw "Executable smoke test failed" }
+          if ($helpOutput[0] -ne $banner) { throw "Help must start with the project version" }
+          $versionOutput = @(& $files[0].FullName --version)
+          if ($LASTEXITCODE -ne 0) { throw "Version smoke test failed" }
+          if ($versionOutput.Count -ne 1 -or $versionOutput[0] -ne $banner) { throw "Version output must contain exactly one version banner" }
+      - name: Exercise inline UI in a real pseudoterminal
+        if: runner.os == 'Linux'
+        shell: bash
+        run: python3 tests/terminal_smoke.py "artifacts/${{ matrix.rid }}/ssh-cert"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ssh-cert-${{ matrix.rid }}
+          path: artifacts/${{ matrix.rid }}/ssh-cert*
+      - name: Stop disposable SSH fixture
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/ssh-cert-fixture/sshd.pid" ]; then
+            sudo kill "$(cat "$RUNNER_TEMP/ssh-cert-fixture/sshd.pid")"
+          fi
