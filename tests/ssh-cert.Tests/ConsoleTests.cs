@@ -11,6 +11,8 @@ public sealed class FakeTerminal : ITerminal
     public int Top => 0;
     public int CursorTop { get; set; }
     public bool Visible { get; private set; } = true;
+    public ConsoleColor ForegroundColor { get; set; } = ConsoleColor.Gray;
+    public Dictionary<int, ConsoleColor> RowColors { get; } = [];
     public int Scrolled { get; private set; }
     public Queue<ConsoleKeyInfo> Keys { get; } = new();
     public Dictionary<int, string> Rows { get; } = [];
@@ -29,7 +31,7 @@ public sealed class FakeTerminal : ITerminal
             foreach (var _ in value)
                 if (CursorTop == Height - 1) Scrolled++; else CursorTop++;
         }
-        else Rows[CursorTop] = value;
+        else { Rows[CursorTop] = value; RowColors[CursorTop] = ForegroundColor; }
     }
     public void Cursor(bool visible) => Visible = visible;
     public void Key(ConsoleKey key, char character = '\0') => Keys.Enqueue(new ConsoleKeyInfo(character, key, false, false, false));
@@ -84,6 +86,9 @@ public class ConsoleTests
         var result = new Prompts(terminal, () => CancellationToken.None).Confirm("Import this connection?");
         Assert.Equal(confirmed, result);
         Assert.Contains(terminal.Rows.Values, row => row.Contains("Enter: confirm  Esc: cancel", StringComparison.Ordinal));
+        Assert.Contains(terminal.RowColors.Values, color => color == ConsoleColor.Cyan);
+        Assert.Contains(terminal.RowColors.Values, color => color == ConsoleColor.DarkGray);
+        Assert.Equal(ConsoleColor.Gray, terminal.ForegroundColor);
         Assert.DoesNotContain(terminal.Rows.Values, row => row.Contains("[ ]") || row.Contains("[X]") || row.Contains("type to filter"));
         Assert.True(terminal.Visible);
     }
@@ -155,6 +160,43 @@ public class ConsoleTests
         terminal.Key(ConsoleKey.Enter);
         var prompt = new Prompts(terminal, () => CancellationToken.None);
         Assert.Equal([0, 1], prompt.Check("Choose", ["alpha", "beta"]).Order().ToArray());
+    }
+
+    [Fact]
+    public void ListHighlightsSelectionAndSeparatesChoicesFromHints()
+    {
+        var terminal = new FakeTerminal();
+        terminal.Key(ConsoleKey.DownArrow);
+        terminal.Key(ConsoleKey.Enter);
+        Assert.Equal(1, new Prompts(terminal, () => CancellationToken.None).Choose("Choose", ["alpha", "beta"]));
+        Assert.Equal(ConsoleColor.Cyan, terminal.RowColors[0]);
+        Assert.Equal("", terminal.Rows[1].Trim());
+        Assert.Equal(ConsoleColor.Yellow, terminal.RowColors[3]);
+        Assert.Equal("", terminal.Rows[4].Trim());
+        Assert.Equal(ConsoleColor.DarkGray, terminal.RowColors[5]);
+        Assert.Equal(ConsoleColor.Gray, terminal.ForegroundColor);
+    }
+
+    [Fact]
+    public void CheckedItemsRemainVisibleWithoutTakingFocus()
+    {
+        var terminal = new FakeTerminal();
+        terminal.Key(ConsoleKey.Spacebar, ' ');
+        terminal.Key(ConsoleKey.DownArrow);
+        terminal.Key(ConsoleKey.Enter);
+        Assert.Equal([0], new Prompts(terminal, () => CancellationToken.None).Check("Choose", ["alpha", "beta"]));
+        Assert.Equal(ConsoleColor.Green, terminal.RowColors[2]);
+        Assert.Equal(ConsoleColor.Yellow, terminal.RowColors[3]);
+    }
+
+    [Fact]
+    public void ShortTerminalKeepsChoicesAndHintsCompact()
+    {
+        var terminal = new FakeTerminal { Height = 5, CursorTop = 4 };
+        terminal.Key(ConsoleKey.Enter);
+        Assert.Equal(0, new Prompts(terminal, () => CancellationToken.None).Choose("Choose", ["alpha"]));
+        Assert.DoesNotContain(terminal.Rows.Values, row => row.Trim() == "");
+        Assert.All(terminal.Rows.Keys, row => Assert.InRange(row, 0, terminal.Height - 1));
     }
 
     [Theory]

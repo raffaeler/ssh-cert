@@ -13,6 +13,7 @@ public interface ITerminal
     ConsoleKeyInfo ReadKey();
     void Move(int column, int row);
     void Write(string value);
+    ConsoleColor ForegroundColor { get; set; }
     void Cursor(bool visible);
 }
 
@@ -26,6 +27,7 @@ public sealed class SystemTerminal : ITerminal
     public ConsoleKeyInfo ReadKey() => Console.ReadKey(true);
     public void Move(int column, int row) => Console.SetCursorPosition(column, row);
     public void Write(string value) => Console.Write(value);
+    public ConsoleColor ForegroundColor { get => Console.ForegroundColor; set => Console.ForegroundColor = value; }
     public void Cursor(bool visible) => Console.CursorVisible = visible;
 }
 
@@ -63,12 +65,14 @@ public readonly record struct Viewport(int Capacity, int First, int Count)
 {
     public static Viewport For(int height, int items, int selected)
     {
-        var capacity = Math.Max(1, height - 4);
+        var capacity = Math.Max(1, height - (height >= 8 ? 6 : 4));
         var count = Math.Min(capacity, items);
         var first = Math.Clamp(selected - capacity + 1, 0, Math.Max(0, items - count));
         return new(capacity, first, count);
     }
 }
+
+public readonly record struct DisplayLine(string Text, ConsoleColor? Color = null);
 
 public sealed class Region(ITerminal terminal) : IDisposable
 {
@@ -77,9 +81,11 @@ public sealed class Region(ITerminal terminal) : IDisposable
     private int _rows;
     private int _width;
     private int _height;
-    private string[] _previous = [];
+    private DisplayLine[] _previous = [];
 
-    public void Draw(IReadOnlyList<string> lines)
+    public void Draw(IReadOnlyList<string> lines) => Draw(lines.Select(line => new DisplayLine(line)).ToArray());
+
+    public void Draw(IReadOnlyList<DisplayLine> lines)
     {
         var w = _terminal.Width;
         var h = _terminal.Height;
@@ -96,10 +102,19 @@ public sealed class Region(ITerminal terminal) : IDisposable
             _height = h;
         }
         _terminal.Cursor(false);
-        for (var i = 0; i < _rows; i++)
+        var originalColor = _terminal.ForegroundColor;
+        try
         {
-            _terminal.Move(0, _anchor + i);
-            _terminal.Write(Display.Fit(i < count ? lines[i] : "", w - 1));
+            for (var i = 0; i < _rows; i++)
+            {
+                _terminal.ForegroundColor = i < count ? lines[i].Color ?? originalColor : originalColor;
+                _terminal.Move(0, _anchor + i);
+                _terminal.Write(Display.Fit(i < count ? lines[i].Text : "", w - 1));
+            }
+        }
+        finally
+        {
+            _terminal.ForegroundColor = originalColor;
         }
         _terminal.Move(0, _anchor + _rows);
         _previous = lines.ToArray();

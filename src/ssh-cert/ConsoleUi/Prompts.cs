@@ -44,7 +44,10 @@ public sealed class Prompts(ITerminal terminal, Func<CancellationToken> cancella
         using var region = new Region(_terminal);
         while (true)
         {
-            region.Draw([title, "Enter: confirm  Esc: cancel"]);
+            var lines = new List<DisplayLine> { new(title, ConsoleColor.Cyan) };
+            if (_terminal.Height >= 6) lines.Add(new(""));
+            lines.Add(new("Enter: confirm  Esc: cancel", ConsoleColor.DarkGray));
+            region.Draw(lines);
             var key = Key(cancelOnEscape: false);
             if (key?.Key == ConsoleKey.Enter) return true;
             if (key?.Key == ConsoleKey.Escape) return false;
@@ -66,14 +69,17 @@ public sealed class Prompts(ITerminal terminal, Func<CancellationToken> cancella
                 .Where(i => items[i].Contains(search, StringComparison.OrdinalIgnoreCase)).ToList();
             cursor = Math.Clamp(cursor, 0, Math.Max(0, indices.Count - 1));
             var view = Viewport.For(_terminal.Height, indices.Count, cursor);
-            var lines = new List<string> { title + (filter.Length > 0 ? $" / {filter}" : "") };
+            var lines = new List<DisplayLine> { new(title + (filter.Length > 0 ? $" / {filter}" : ""), ConsoleColor.Cyan) };
+            if (_terminal.Height >= 8) lines.Add(new(""));
             for (var i = view.First; i < view.First + view.Count; i++)
-                lines.Add((i == cursor ? "> " : "  ") +
-                    (multiple ? selected.Contains(indices[i]) ? "[X] " : "[ ] " : "") + items[indices[i]]);
-            if (indices.Count == 0) lines.Add(items.Count == 0 ? emptyMessage : "(no matches)");
-            lines.Add(multiple ? "Space: toggle  Enter: confirm  Esc: cancel" : "Arrows: select  Enter: confirm  Esc: cancel");
-            lines.Add((multiple ? $"{selected.Count} selected | " : "") +
-                $"{indices.Count} choices | type to filter");
+                lines.Add(new((i == cursor ? "> " : "  ") +
+                    (multiple ? selected.Contains(indices[i]) ? "[X] " : "[ ] " : "") + items[indices[i]],
+                    i == cursor ? ConsoleColor.Yellow : multiple && selected.Contains(indices[i]) ? ConsoleColor.Green : null));
+            if (indices.Count == 0) lines.Add(new(items.Count == 0 ? emptyMessage : "(no matches)", ConsoleColor.Yellow));
+            if (_terminal.Height >= 8) lines.Add(new(""));
+            lines.Add(new(multiple ? "Space: toggle  Enter: confirm  Esc: cancel" : "Arrows: select  Enter: confirm  Esc: cancel", ConsoleColor.DarkGray));
+            lines.Add(new((multiple ? $"{selected.Count} selected | " : "") +
+                $"{indices.Count} choices | type to filter", ConsoleColor.DarkGray));
             region.Draw(lines);
             var key = Key();
             if (key is null) continue;
@@ -113,7 +119,11 @@ public sealed class Prompts(ITerminal terminal, Func<CancellationToken> cancella
             var shown = (secret ? new string('*', text.Length) : text).Insert(cursor, "|");
             var capacity = Math.Max(1, _terminal.Width - 5);
             var start = Math.Max(0, cursor - capacity);
-            region.Draw([title, "> " + shown[start..], "Enter: confirm  Esc: cancel"]);
+            var lines = new List<DisplayLine> { new(title, ConsoleColor.Cyan) };
+            if (_terminal.Height >= 6) lines.Add(new(""));
+            lines.Add(new("> " + shown[start..], ConsoleColor.Yellow));
+            lines.Add(new("Enter: confirm  Esc: cancel", ConsoleColor.DarkGray));
+            region.Draw(lines);
             var key = Key();
             if (key is null) continue;
             switch (key.Value.Key)

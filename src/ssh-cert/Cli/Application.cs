@@ -68,10 +68,26 @@ public sealed class Application : IDisposable
         JsonException or SshException or SocketException or CryptographicException or FormatException or
         ArgumentException or InvalidOperationException or TimeoutException;
 
-    public static void Message(string message, bool error = false)
+    public static void Message(string message, bool error = false, ConsoleColor? color = null)
     {
         var clean = new string(message.Select(c => char.IsControl(c) && c is not ('\r' or '\n' or '\t') ? '?' : c).ToArray());
-        if (error) Console.Error.WriteLine(clean); else Console.WriteLine(clean);
+        var writer = error ? Console.Error : Console.Out;
+        var highlight = error ? ConsoleColor.Red : color;
+        if (highlight is null || (error ? Console.IsErrorRedirected : Console.IsOutputRedirected))
+        {
+            writer.WriteLine(clean);
+            return;
+        }
+        var originalColor = Console.ForegroundColor;
+        try
+        {
+            Console.ForegroundColor = highlight.Value;
+            writer.WriteLine(clean);
+        }
+        finally
+        {
+            Console.ForegroundColor = originalColor;
+        }
     }
 
     public static async Task<int> Run(string[] args)
@@ -102,7 +118,7 @@ public sealed class Application : IDisposable
 
     private async Task<int> Interactive()
     {
-        Message("ssh-cert | Type / for commands. Disabled is a local convenience toggle, not revocation.");
+        Message("Type / for commands. Disabled does not revoke keys.");
         if (_store.NeedsRecovery)
         {
             var choice = _ui.Choose("Interrupted local update. Recover before continuing.",
@@ -112,7 +128,7 @@ public sealed class Application : IDisposable
             Message("Local update recovered.");
         }
         var snapshot = _store.Load();
-        Message(DescribeActiveGroup(snapshot.State, snapshot.Groups));
+        Message(DescribeActiveGroup(snapshot.State, snapshot.Groups), color: ConsoleColor.Green);
         while (true)
         {
             _operation.Dispose();

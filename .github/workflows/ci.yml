@@ -37,6 +37,7 @@ jobs:
           fi
           sudo useradd -m -s /bin/sh sshcerttarget
           sudo useradd -m -s /bin/sh sshcertadmin
+          sudo install -d -m 700 -o sshcerttarget -g sshcerttarget /home/sshcerttarget/.ssh
           # Deliberately public credentials for disposable, loopback-only CI users.
           printf 'sshcerttarget:ci-fixture-only\nsshcertadmin:ci-fixture-only\n' | sudo chpasswd
           echo 'sshcertadmin ALL=(sshcerttarget) /bin/sh' | sudo tee /etc/sudoers.d/ssh-cert-test >/dev/null

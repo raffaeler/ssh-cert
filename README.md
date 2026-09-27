@@ -33,7 +33,8 @@ Menus are inline and preserve terminal history. Long lists scroll within the
 available viewport; menus reserve additional lines at the bottom of the
 terminal. Resize to at least 16 columns and 4 rows. Interactive commands need
 terminal input and output; redirected use supports `--group`, `--help`, and
-`--version`.
+`--version`. Titles, the current choice, checked items, and status messages use
+color to make them easier to scan; redirected output remains plain text.
 
 | Command | Behavior |
 |---|---|
